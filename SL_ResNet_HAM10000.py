@@ -54,7 +54,7 @@ def prGreen(skk): print("\033[92m {}\033[00m" .format(skk))
 
 #===================================================================  
 # No. of users
-num_users = 5
+num_users = 10
 epochs = 200
 frac = 1   # participation of clients; if 1 then 100% clients participate in SL
 lr = 0.0001
@@ -96,9 +96,6 @@ class ResNet18_client_side(nn.Module):
         resudial2 = F.relu(out1)
         return resudial2
  
- 
-           
-
 net_glob_client = ResNet18_client_side()
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")
@@ -136,6 +133,7 @@ class Baseblock(nn.Module):
         return output
 
 
+
 class ResNet18_server_side(nn.Module):
     def __init__(self, block, num_layers, classes):
         super(ResNet18_server_side, self).__init__()
@@ -151,7 +149,8 @@ class ResNet18_server_side(nn.Module):
         self.layer4 = self._layer(block, 128, num_layers[0], stride = 2)
         self.layer5 = self._layer(block, 256, num_layers[1], stride = 2)
         self.layer6 = self._layer(block, 512, num_layers[2], stride = 2)
-        self. averagePool = nn.AvgPool2d(kernel_size = 7, stride = 1)
+        self. averagePool = nn.AvgPool2d(kernel_size = 10, stride = 1)
+        # self. averagePool = nn.AdaptiveAvgPool2d(output_size= 3)
         self.fc = nn.Linear(512 * block.expansion, classes)
         
         for m in self.modules():
@@ -187,13 +186,15 @@ class ResNet18_server_side(nn.Module):
         x5 = self.layer5(x4)
         x6 = self.layer6(x5)
         
-        x7 = F.avg_pool2d(x6, 7)
+        x7 = F.avg_pool2d(x6,2)
         x8 = x7.view(x7.size(0), -1) 
         y_hat =self.fc(x8)
         
         return y_hat
 
 net_glob_server = ResNet18_server_side(Baseblock, [2,2,2], 7) #7 is my numbr of classes
+
+
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")
     net_glob_server = nn.DataParallel(net_glob_server)   # to use the multiple GPUs 

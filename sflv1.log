@@ -1,0 +1,129 @@
+NVIDIA GeForce RTX 3080 Ti
+---------SFLV1 ResNet18 on HAM10000----------
+We use 4 GPUs
+DataParallel(
+  (module): ResNet18_client_side(
+    (layer1): Sequential(
+      (0): Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+      (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+      (3): MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
+    )
+    (layer2): Sequential(
+      (0): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+      (3): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    )
+  )
+)
+DataParallel(
+  (module): ResNet18_client_side2(
+    (layer1): Sequential(
+      (0): Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+      (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+      (3): MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
+    )
+  )
+)
+We use 4 GPUs
+DataParallel(
+  (module): ResNet18_server_side(
+    (layer3): Sequential(
+      (0): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+      (3): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    )
+    (layer4): Sequential(
+      (0): Baseblock(
+        (conv1): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+        (bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (dim_change): Sequential(
+          (0): Conv2d(64, 128, kernel_size=(1, 1), stride=(2, 2))
+          (1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+      (1): Baseblock(
+        (conv1): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (layer5): Sequential(
+      (0): Baseblock(
+        (conv1): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+        (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (dim_change): Sequential(
+          (0): Conv2d(128, 256, kernel_size=(1, 1), stride=(2, 2))
+          (1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+      (1): Baseblock(
+        (conv1): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (layer6): Sequential(
+      (0): Baseblock(
+        (conv1): Conv2d(256, 512, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+        (bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (dim_change): Sequential(
+          (0): Conv2d(256, 512, kernel_size=(1, 1), stride=(2, 2))
+          (1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+      (1): Baseblock(
+        (conv1): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (averagePool): AvgPool2d(kernel_size=10, stride=1, padding=0)
+    (fc): Linear(in_features=512, out_features=7, bias=True)
+  )
+)
+[91m Client1 Train => Local Epoch: 0 	Acc: 35.023 	Loss: 1.6594[00m
+[92m Client1 Test =>                   	Acc: 12.000 	Loss: 1.8526[00m
+[91m Client0 Train => Local Epoch: 0 	Acc: 36.491 	Loss: 1.6002[00m
+[92m Client0 Test =>                   	Acc: 9.500 	Loss: 1.8895[00m
+[91m Client6 Train => Local Epoch: 0 	Acc: 37.589 	Loss: 1.6433[00m
+[92m Client6 Test =>                   	Acc: 10.500 	Loss: 1.8617[00m
+[91m Client3 Train => Local Epoch: 0 	Acc: 37.858 	Loss: 1.6394[00m
+[92m Client3 Test =>                   	Acc: 17.000 	Loss: 1.8855[00m
+[91m Client9 Train => Local Epoch: 0 	Acc: 31.605 	Loss: 1.6569[00m
+[92m Client9 Test =>                   	Acc: 9.500 	Loss: 1.9095[00m
+[91m Client4 Train => Local Epoch: 0 	Acc: 36.515 	Loss: 1.6259[00m
+[92m Client4 Test =>                   	Acc: 51.000 	Loss: 1.7821[00m
+[91m Client5 Train => Local Epoch: 0 	Acc: 34.952 	Loss: 1.6314[00m
+[92m Client5 Test =>                   	Acc: 36.500 	Loss: 1.7987[00m
+[91m Client8 Train => Local Epoch: 0 	Acc: 32.508 	Loss: 1.6580[00m
+[92m Client8 Test =>                   	Acc: 39.000 	Loss: 1.8100[00m
+[91m Client7 Train => Local Epoch: 0 	Acc: 36.905 	Loss: 1.6181[00m
+[92m Client7 Test =>                   	Acc: 29.000 	Loss: 1.8327[00m
+[91m Client2 Train => Local Epoch: 0 	Acc: 36.955 	Loss: 1.6175[00m
+[92m Client2 Test =>                   	Acc: 2.500 	Loss: 1.9190[00m
+------------------------------------------------
+------ Federation process at Server-Side ------- 
+------------------------------------------------
+====================== SERVER V1==========================
+ Train: Round   0, Avg Accuracy 35.640 | Avg Loss 1.635
+ Test: Round   0, Avg Accuracy 21.650 | Avg Loss 1.854
+==========================================================
+-----------------------------------------------------------
+------ FedServer: Federation process at Client-Side ------- 
+-----------------------------------------------------------
+Training and Evaluation completed!

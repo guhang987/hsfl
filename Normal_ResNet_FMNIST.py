@@ -5,6 +5,7 @@
 import os
 import torch
 from torch import nn
+import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset
 from pandas import DataFrame
@@ -32,101 +33,27 @@ if torch.cuda.is_available():
 
     
 #===================================================================    
-program = "Normal Learning ResNet18 on HAM10000"
+program = "Normal Learning ResNet18 on FMNIST"
 print(f"---------{program}----------")              
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #=============================================================================
 #                         Data loading 
 #=============================================================================    
-df = pd.read_csv('data/HAM10000_metadata.csv')
-print(df.head())
 def prRed(skk): print("\033[91m {}\033[00m" .format(skk)) 
 def prGreen(skk): print("\033[92m {}\033[00m" .format(skk))    
 
-lesion_type = {
-    'nv': 'Melanocytic nevi',
-    'mel': 'Melanoma',
-    'bkl': 'Benign keratosis-like lesions ',
-    'bcc': 'Basal cell carcinoma',
-    'akiec': 'Actinic keratoses',
-    'vasc': 'Vascular lesions',
-    'df': 'Dermatofibroma'
-}
-
-# merging both folders of HAM1000 dataset -- part1 and part2 -- into a single directory
-imageid_path = {os.path.splitext(os.path.basename(x))[0]: x
-                for x in glob(os.path.join("data", '*', '*.jpg'))}
-
-
-df['path'] = df['image_id'].map(imageid_path.get)
-df['cell_type'] = df['dx'].map(lesion_type.get)
-df['target'] = pd.Categorical(df['cell_type']).codes
-print(df['cell_type'].value_counts())
-print(df['target'].value_counts())
-
-
-#==============================================================
-# Custom dataset prepration in Pytorch format
-class SkinData(Dataset):
-    def __init__(self, df, transform = None):
-        self.df = df
-        self.transform = transform
-        
-    def __len__(self):
-        
-        return len(self.df)
-    
-    def __getitem__(self, index):
-        
-        X = Image.open(self.df['path'][index]).resize((64, 64))
-        y = torch.tensor(int(self.df['target'][index]))
-        
-        if self.transform:
-            X = self.transform(X)
-        
-        return X, y
-
-
-#=============================================================================
-# Train-test split    
-train, test = train_test_split(df, test_size = 0.2)
-
-train = train.reset_index()
-test = test.reset_index()
 #=============================================================================
 #                         Data preprocessing
 #=============================================================================  
 # Data preprocessing: Transformation 
-mean = [0.485, 0.456, 0.406]
-std = [0.229, 0.224, 0.225]
-train_transforms = transforms.Compose([transforms.RandomHorizontalFlip(), 
-                        transforms.RandomVerticalFlip(),
-                        transforms.Pad(3),
-                        transforms.RandomRotation(10),
-                        transforms.CenterCrop(64),
-                        transforms.ToTensor(), 
-                        transforms.Normalize(mean = mean, std = std)
-                        ])
-    
-test_transforms = transforms.Compose([
-                        transforms.Pad(3),
-                        transforms.CenterCrop(64),
-                        transforms.ToTensor(), 
-                        transforms.Normalize(mean = mean, std = std)
-                        ])    
-
-
-dataset_train = SkinData(train, transform = train_transforms)
-dataset_test = SkinData(test, transform = test_transforms)
-
+dataset_train = torchvision.datasets.FashionMNIST("./data", download=True, transform=
+                                                transforms.Compose([transforms.ToTensor()]))
+dataset_test = torchvision.datasets.FashionMNIST("./data", download=True, train=False, transform=
+                                               transforms.Compose([transforms.ToTensor()]))  
 train_iterator = DataLoader(dataset_train, shuffle = True, batch_size = 256)
 test_iterator = DataLoader(dataset_test, batch_size = 256)
 
-
-
-print(f'Number of training examples: {len(train)}')
-print(f'Number of testing examples: {len(test)}')
 
 for x, y in train_iterator:
     print("shape of x = ", x.shape)
@@ -178,7 +105,7 @@ class ResNet18(nn.Module):
     def __init__(self, block, layers, num_classes=1000):
         self.inplanes = 64
         super(ResNet18, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
@@ -187,7 +114,7 @@ class ResNet18(nn.Module):
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
-        self.avgpool = nn.AvgPool2d(2)
+        self.avgpool = nn.AvgPool2d(1)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
@@ -233,7 +160,7 @@ class ResNet18(nn.Module):
         return x
 
        
-net_glob = ResNet18(BasicBlock, [2, 2, 2, 2], 7) # Class labels for HAM10000 = 7 
+net_glob = ResNet18(BasicBlock, [2, 2, 2, 2], 10) # Class labels for HAM10000 = 7 
 
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")

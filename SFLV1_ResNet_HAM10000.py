@@ -54,7 +54,7 @@ def prGreen(skk): print("\033[92m {}\033[00m" .format(skk))
 
 #===================================================================
 # No. of users
-num_users = 5
+num_users = 10
 epochs = 200
 frac = 1        # participation of clients; if 1 then 100% clients participate in SFLV1
 lr = 0.0001
@@ -97,15 +97,17 @@ class ResNet18_client_side(nn.Module):
         resudial2 = F.relu(out1)
         return resudial2
  
- 
+
            
 
 net_glob_client = ResNet18_client_side()
+
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")
     net_glob_client = nn.DataParallel(net_glob_client)    
-
+  
 net_glob_client.to(device)
+
 print(net_glob_client)     
 
 #=====================================================================================================
@@ -151,7 +153,8 @@ class ResNet18_server_side(nn.Module):
         self.layer4 = self._layer(block, 128, num_layers[0], stride = 2)
         self.layer5 = self._layer(block, 256, num_layers[1], stride = 2)
         self.layer6 = self._layer(block, 512, num_layers[2], stride = 2)
-        self. averagePool = nn.AvgPool2d(kernel_size = 7, stride = 1)
+        self. averagePool = nn.AvgPool2d(kernel_size = 10, stride = 1)
+        # self. averagePool = nn.AdaptiveAvgPool2d(output_size= 3)
         self.fc = nn.Linear(512 * block.expansion, classes)
         
         for m in self.modules():
@@ -187,7 +190,7 @@ class ResNet18_server_side(nn.Module):
         x5 = self.layer5(x4)
         x6 = self.layer6(x5)
         
-        x7 = F.avg_pool2d(x6, 7)
+        x7 = F.avg_pool2d(x6,2)
         x8 = x7.view(x7.size(0), -1) 
         y_hat =self.fc(x8)
         
@@ -222,10 +225,21 @@ count2 = 0
 # Federated averaging: FedAvg
 def FedAvg(w):
     w_avg = copy.deepcopy(w[0])
-    for k in w_avg.keys():
-        for i in range(1, len(w)):
-            w_avg[k] += w[i][k]
-        w_avg[k] = torch.div(w_avg[k], len(w))
+    
+    for index, k in enumerate(w_avg.keys()):
+        if index > 5 :
+            # 层数大于5 只聚合前5个设备
+            for i in range(0, 5):
+                w_avg[k] += w[i][k]
+            w_avg[k] = torch.div(w_avg[k], len(w))
+        
+        else :
+            # 层数小于5 10个设备全部聚合
+            for i in range(0, 10):
+                w_avg[k] += w[i][k]
+            w_avg[k] = torch.div(w_avg[k], len(w)) 
+            
+
     return w_avg
 
 
@@ -458,6 +472,7 @@ class Client(object):
         
         for iter in range(self.local_ep):
             len_batch = len(self.ldr_train)
+            
             for batch_idx, (images, labels) in enumerate(self.ldr_train):
                 images, labels = images.to(self.device), labels.to(self.device)
                 optimizer_client.zero_grad()
@@ -509,7 +524,7 @@ def dataset_iid(dataset, num_users):
 #                         Data loading 
 #============================================================================= 
 df = pd.read_csv('data/HAM10000_metadata.csv')
-print(df.head())
+# print(df.head())
 
 
 lesion_type = {
@@ -528,11 +543,13 @@ imageid_path = {os.path.splitext(os.path.basename(x))[0]: x
 
 
 #print("path---------------------------------------", imageid_path.get)
+
 df['path'] = df['image_id'].map(imageid_path.get)
+
 df['cell_type'] = df['dx'].map(lesion_type.get)
 df['target'] = pd.Categorical(df['cell_type']).codes
-print(df['cell_type'].value_counts())
-print(df['target'].value_counts())
+# print(df['cell_type'].value_counts())
+# print(df['target'].value_counts())
 
 #==============================================================
 # Custom dataset prepration in Pytorch format
@@ -597,6 +614,7 @@ dict_users_test = dataset_iid(dataset_test, num_users)
 
 #------------ Training And Testing  -----------------
 net_glob_client.train()
+
 #copy weights
 w_glob_client = net_glob_client.state_dict()
 # Federation takes place after certain local epochs in train() client-side
@@ -605,7 +623,7 @@ for iter in range(epochs):
     m = max(int(frac * num_users), 1)
     idxs_users = np.random.choice(range(num_users), m, replace = False)
     w_locals_client = []
-      
+    # 前5个 3层
     for idx in idxs_users:
         local = Client(net_glob_client, idx, lr, device, dataset_train = dataset_train, dataset_test = dataset_test, idxs = dict_users[idx], idxs_test = dict_users_test[idx])
         # Training ------------------
@@ -614,8 +632,8 @@ for iter in range(epochs):
         
         # Testing -------------------
         local.evaluate(net = copy.deepcopy(net_glob_client).to(device), ell= iter)
-        
-            
+     #后5个 6层   
+         
     # Ater serving all clients for its local epochs------------
     # Fed  Server: Federation process at Client-Side-----------
     print("-----------------------------------------------------------")
@@ -625,7 +643,7 @@ for iter in range(epochs):
     
     # Update client-side global model 
     net_glob_client.load_state_dict(w_glob_client)    
-    
+      
 #===================================================================================     
 
 print("Training and Evaluation completed!")    

@@ -11,6 +11,8 @@
 # ===========================================================
 import torch
 from torch import nn
+from torch.autograd import Variable
+import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset
 from pandas import DataFrame
@@ -39,7 +41,7 @@ if torch.cuda.is_available():
 
 
 #===================================================================  
-program = "FL ResNet18 on HAM10000"
+program = "FL AlexNet on MNIST"
 print(f"---------{program}----------")              # this is to identify the program in the slurm outputs files
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -80,8 +82,8 @@ class LocalUpdate(object):
         self.local_ep = 1
         self.loss_func = nn.CrossEntropyLoss()
         self.selected_clients = []
-        self.ldr_train = DataLoader(DatasetSplit(dataset_train, idxs), batch_size = 256, shuffle = True)
-        self.ldr_test = DataLoader(DatasetSplit(dataset_test, idxs_test), batch_size = 256, shuffle = True)
+        self.ldr_train = DataLoader(DatasetSplit(train_set, idxs), batch_size = 256, shuffle = True)
+        self.ldr_test = DataLoader(DatasetSplit(test_set, idxs_test), batch_size = 256, shuffle = True)
 
     def train(self, net):
         net.train()
@@ -99,6 +101,7 @@ class LocalUpdate(object):
                 images, labels = images.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 #---------forward prop-------------
+                images = Variable(images.view(-1, 1, 28, 28))
                 fx = net(images)
                 
                 # calculate loss
@@ -150,52 +153,16 @@ class LocalUpdate(object):
 #=============================================================================
 #                         Data loading 
 #============================================================================= 
-df = pd.read_csv('data/HAM10000_metadata.csv')
-print(df.head())
-
-lesion_type = {
-    'nv': 'Melanocytic nevi',
-    'mel': 'Melanoma',
-    'bkl': 'Benign keratosis-like lesions ',
-    'bcc': 'Basal cell carcinoma',
-    'akiec': 'Actinic keratoses',
-    'vasc': 'Vascular lesions',
-    'df': 'Dermatofibroma'
-}
-
-# merging both folders of HAM1000 dataset -- part1 and part2 -- into a single directory
-imageid_path = {os.path.splitext(os.path.basename(x))[0]: x
-                for x in glob(os.path.join("data", '*', '*.jpg'))}
 
 
-#print("path---------------------------------------", imageid_path.get)
-df['path'] = df['image_id'].map(imageid_path.get)
-df['cell_type'] = df['dx'].map(lesion_type.get)
-df['target'] = pd.Categorical(df['cell_type']).codes
-print(df['cell_type'].value_counts())
-print(df['target'].value_counts())
 
 #==============================================================
 # Custom dataset prepration in Pytorch format
-class SkinData(Dataset):
-    def __init__(self, df, transform = None):
-        
-        self.df = df
-        self.transform = transform
-        
-    def __len__(self):
-        
-        return len(self.df)
-    
-    def __getitem__(self, index):
-        
-        X = Image.open(self.df['path'][index]).resize((64, 64))
-        y = torch.tensor(int(self.df['target'][index]))
-        
-        if self.transform:
-            X = self.transform(X)
-        
-        return X, y
+
+train_set = torchvision.datasets.MNIST("./data", download=True, transform=
+                                                transforms.Compose([transforms.ToTensor()]))
+test_set = torchvision.datasets.MNIST("./data", download=True, train=False, transform=
+                                               transforms.Compose([transforms.ToTensor()]))  
 
 #=====================================================================================================
 # dataset_iid() will create a dictionary to collect the indices of the data samples randomly for each client
@@ -212,42 +179,16 @@ def dataset_iid(dataset, num_users):
 
 #=============================================================================
 # Train-test split  
-train, test = train_test_split(df, test_size = 0.2)
-
-train = train.reset_index()
-test = test.reset_index()
 
 #=============================================================================
 #                         Data preprocessing
 #=============================================================================  
-# Data preprocessing: Transformation 
-mean = [0.485, 0.456, 0.406]
-std = [0.229, 0.224, 0.225]
 
-train_transforms = transforms.Compose([transforms.RandomHorizontalFlip(), 
-                        transforms.RandomVerticalFlip(),
-                        transforms.Pad(3),
-                        transforms.RandomRotation(10),
-                        transforms.CenterCrop(64),
-                        transforms.ToTensor(), 
-                        transforms.Normalize(mean = mean, std = std)
-                        ])
-    
-test_transforms = transforms.Compose([
-                        transforms.Pad(3),
-                        transforms.CenterCrop(64),
-                        transforms.ToTensor(), 
-                        transforms.Normalize(mean = mean, std = std)
-                        ])    
 
-# With augmentation
-dataset_train = SkinData(train, transform = train_transforms)
-dataset_test = SkinData(test, transform = test_transforms)
- 
 
 #-----------------------------------------------
-dict_users = dataset_iid(dataset_train, num_users)
-dict_users_test = dataset_iid(dataset_test, num_users)
+dict_users = dataset_iid(train_set, num_users)
+dict_users_test = dataset_iid(test_set, num_users)
 
 #====================================================================================================
 #                               Server Side Program
@@ -262,105 +203,56 @@ def calculate_accuracy(fx, y):
 #                    Model definition: ResNet18
 #============================================================================= 
 # building a ResNet18 Architecture
-def conv3x3(in_planes, out_planes, stride=1):
-    "3x3 convolution with padding"
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)
-
-
-class BasicBlock(nn.Module):
-    expansion = 1
-
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(BasicBlock, self).__init__()
-        self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2d(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2d(planes)
-        self.downsample = downsample
-        self.stride = stride
-
-    def forward(self, x):
-        residual = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        if self.downsample is not None:
-            residual = self.downsample(x)
-
-        out += residual
-        out = self.relu(out)
-
-        return out
-
-class ResNet18(nn.Module):
-
-    def __init__(self, block, layers, num_classes=1000):
-        self.inplanes = 64
-        super(ResNet18, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
-                               bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
-        self.avgpool = nn.AvgPool2d(2)
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-
-    def _make_layer(self, block, planes, blocks, stride=1):
-        downsample = None
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv2d(self.inplanes, planes * block.expansion,
-                          kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes * block.expansion),
-            )
-
-        layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
-        self.inplanes = planes * block.expansion
-        for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
-
-        return nn.Sequential(*layers)
+class AlexNet(nn.Module):
+    def __init__(self, num_classes=1000, init_weights=False):   
+        super(AlexNet, self).__init__()
+        self.features = nn.Sequential(  #打包
+            nn.Conv2d(1, 48, kernel_size=11, stride=4, padding=2),  # input[3, 224, 224]  output[48, 55, 55] 自动舍去小数点后
+            nn.ReLU(inplace=True), #inplace 可以载入更大模型
+            nn.MaxPool2d(kernel_size=1, stride=2),                  # output[48, 27, 27] kernel_num为原论文一半
+            nn.Conv2d(48, 128, kernel_size=5, padding=2),           # output[128, 27, 27]
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=1, stride=2),                  # output[128, 13, 13]
+            nn.Conv2d(128, 192, kernel_size=3, padding=1),          # output[192, 13, 13]
+            nn.ReLU(inplace=True),
+            nn.Conv2d(192, 192, kernel_size=3, padding=1),          # output[192, 13, 13]
+            nn.ReLU(inplace=True),
+            nn.Conv2d(192, 128, kernel_size=3, padding=1),          # output[128, 13, 13]
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=1, stride=2),                  # output[128, 6, 6]
+        )
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=0.5),
+            #全链接
+            nn.Linear(128, 2048),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(2048, 2048),
+            nn.ReLU(inplace=True),
+            nn.Linear(2048, num_classes),
+        )
+        if init_weights:
+            self._initialize_weights()
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
-
+        x = self.features(x)
+        x = torch.flatten(x, start_dim=1) #展平   或者view()
+        x = self.classifier(x)
         return x
 
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu') #何教授方法
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)  #正态分布赋值
+                nn.init.constant_(m.bias, 0)
 
 
-net_glob = ResNet18(BasicBlock, [2, 2, 2, 2], 7) #7 is my numbr of classes
+
+net_glob = AlexNet() #7 is my numbr of classes
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")
     net_glob = nn.DataParallel(net_glob)   # to use the multiple GPUs 
@@ -394,7 +286,7 @@ for iter in range(epochs):
     
     # Training/Testing simulation
     for idx in idxs_users: # each client
-        local = LocalUpdate(idx, lr, device, dataset_train = dataset_train, dataset_test = dataset_test, idxs = dict_users[idx], idxs_test = dict_users_test[idx])
+        local = LocalUpdate(idx, lr, device, dataset_train = train_set, dataset_test = test_set, idxs = dict_users[idx], idxs_test = dict_users_test[idx])
         # Training ------------------
         w, loss_train, acc_train = local.train(net = copy.deepcopy(net_glob).to(device))
         w_locals.append(copy.deepcopy(w))

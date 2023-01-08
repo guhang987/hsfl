@@ -1,5 +1,5 @@
-#=============================================================================
-# SplitfedV2 (SFLV2) learning: ResNet18 on HAM10000
+#============================================================================
+# SplitfedV1 (SFLV1) learning: ResNet18 on HAM10000
 # HAM10000 dataset: Tschandl, P.: The HAM10000 dataset, a large collection of multi-source dermatoscopic images of common pigmented skin lesions (2018), doi:10.7910/DVN/DBW86T
 
 # We have three versions of our implementations
@@ -8,9 +8,10 @@
 # Version3: without using socket but with DP+PixelDP
 
 # This program is Version1: Single program simulation 
-# ==============================================================================
+# ============================================================================
 import torch
 from torch import nn
+import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
@@ -21,6 +22,7 @@ from sklearn.model_selection import train_test_split
 from PIL import Image
 from glob import glob
 from pandas import DataFrame
+
 import random
 import numpy as np
 import os
@@ -42,7 +44,7 @@ if torch.cuda.is_available():
     print(torch.cuda.get_device_name(0))    
 
 #===================================================================
-program = "SFLV2 ResNet18 on HAM10000"
+program = "SFLV1 ResNet18 on FMnist"
 print(f"---------{program}----------")              # this is to identify the program in the slurm outputs files
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -51,12 +53,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def prRed(skk): print("\033[91m {}\033[00m" .format(skk)) 
 def prGreen(skk): print("\033[92m {}\033[00m" .format(skk))     
 
-
 #===================================================================
 # No. of users
-num_users = 5
+num_users = 10
 epochs = 200
-frac = 1        # participation of clients; if 1 then 100% clients participate in SFLV2
+frac = 1        # participation of clients; if 1 then 100% clients participate in SFLV1
 lr = 0.0001
 
 
@@ -68,7 +69,7 @@ class ResNet18_client_side(nn.Module):
     def __init__(self):
         super(ResNet18_client_side, self).__init__()
         self.layer1 = nn.Sequential (
-                nn.Conv2d(3, 64, kernel_size = 7, stride = 2, padding = 3, bias = False),
+                nn.Conv2d(1, 64, kernel_size = 7, stride = 2, padding = 3, bias = False),
                 nn.BatchNorm2d(64),
                 nn.ReLU (inplace = True),
                 nn.MaxPool2d(kernel_size = 3, stride = 2, padding =1),
@@ -98,13 +99,17 @@ class ResNet18_client_side(nn.Module):
         return resudial2
  
 
+           
+
 net_glob_client = ResNet18_client_side()
+
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")
-    net_glob_client = nn.DataParallel(net_glob_client)   # to use the multiple GPUs; later we can change this to CPUs only 
-
+    net_glob_client = nn.DataParallel(net_glob_client)    
+  
 net_glob_client.to(device)
-print(net_glob_client)    
+
+print(net_glob_client)     
 
 #=====================================================================================================
 #                           Server-side Model definition
@@ -149,7 +154,8 @@ class ResNet18_server_side(nn.Module):
         self.layer4 = self._layer(block, 128, num_layers[0], stride = 2)
         self.layer5 = self._layer(block, 256, num_layers[1], stride = 2)
         self.layer6 = self._layer(block, 512, num_layers[2], stride = 2)
-        self. averagePool = nn.AvgPool2d(kernel_size = 7, stride = 1)
+        self. averagePool = nn.AvgPool2d(kernel_size = 10, stride = 1)
+        # self. averagePool = nn.AdaptiveAvgPool2d(output_size= 3)
         self.fc = nn.Linear(512 * block.expansion, classes)
         
         for m in self.modules():
@@ -185,13 +191,13 @@ class ResNet18_server_side(nn.Module):
         x5 = self.layer5(x4)
         x6 = self.layer6(x5)
         
-        x7 = F.avg_pool2d(x6, 2)
+        x7 = F.avg_pool2d(x6,1)
         x8 = x7.view(x7.size(0), -1) 
         y_hat =self.fc(x8)
         
         return y_hat
 
-net_glob_server = ResNet18_server_side(Baseblock, [2,2,2], 7) #7 is my numbr of classes
+net_glob_server = ResNet18_server_side(Baseblock, [2,2,2], 10) #7 is my numbr of classes
 if torch.cuda.device_count() > 1:
     print("We use",torch.cuda.device_count(), "GPUs")
     net_glob_server = nn.DataParallel(net_glob_server)   # to use the multiple GPUs 
@@ -210,21 +216,33 @@ batch_loss_train = []
 batch_acc_test = []
 batch_loss_test = []
 
+
 criterion = nn.CrossEntropyLoss()
 count1 = 0
 count2 = 0
-
 #====================================================================================================
-#                                  Server Side Programs
+#                                  Server Side Program
 #====================================================================================================
 # Federated averaging: FedAvg
 def FedAvg(w):
     w_avg = copy.deepcopy(w[0])
-    for k in w_avg.keys():
-        for i in range(1, len(w)):
-            w_avg[k] += w[i][k]
-        w_avg[k] = torch.div(w_avg[k], len(w))
+    
+    for index, k in enumerate(w_avg.keys()):
+        if index > 5 :
+            # 层数大于5 只聚合前5个设备
+            for i in range(0, 5):
+                w_avg[k] += w[i][k]
+            w_avg[k] = torch.div(w_avg[k], len(w))
+        
+        else :
+            # 层数小于5 10个设备全部聚合
+            for i in range(0, 10):
+                w_avg[k] += w[i][k]
+            w_avg[k] = torch.div(w_avg[k], len(w)) 
+            
+
     return w_avg
+
 
 def calculate_accuracy(fx, y):
     preds = fx.max(1, keepdim=True)[1]
@@ -240,20 +258,27 @@ acc_train_collect_user = []
 loss_test_collect_user = []
 acc_test_collect_user = []
 
+w_glob_server = net_glob_server.state_dict()
+w_locals_server = []
 
 #client idx collector
 idx_collect = []
 l_epoch_check = False
 fed_check = False
+# Initialization of net_model_server and net_server (server-side model)
+net_model_server = [net_glob_server for i in range(num_users)]
+net_server = copy.deepcopy(net_model_server[0]).to(device)
+#optimizer_server = torch.optim.Adam(net_server.parameters(), lr = lr)
 
 # Server-side function associated with Training 
 def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch):
-    global net_glob_server, criterion, device, batch_acc_train, batch_loss_train, l_epoch_check, fed_check
-    global loss_train_collect, acc_train_collect, count1, acc_avg_all_user_train, loss_avg_all_user_train, idx_collect
+    global net_model_server, criterion, optimizer_server, device, batch_acc_train, batch_loss_train, l_epoch_check, fed_check
+    global loss_train_collect, acc_train_collect, count1, acc_avg_all_user_train, loss_avg_all_user_train, idx_collect, w_locals_server, w_glob_server, net_server
     global loss_train_collect_user, acc_train_collect_user, lr
     
-    net_glob_server.train()
-    optimizer_server = torch.optim.Adam(net_glob_server.parameters(), lr = lr)
+    net_server = copy.deepcopy(net_model_server[idx]).to(device)
+    net_server.train()
+    optimizer_server = torch.optim.Adam(net_server.parameters(), lr = lr)
 
     
     # train and update
@@ -263,7 +288,7 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch):
     y = y.to(device)
     
     #---------forward prop-------------
-    fx_server = net_glob_server(fx_client)
+    fx_server = net_server(fx_client)
     
     # calculate loss
     loss = criterion(fx_server, y)
@@ -278,7 +303,8 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch):
     batch_loss_train.append(loss.item())
     batch_acc_train.append(acc.item())
     
-    # server-side model net_glob_server is global so it is updated automatically in each pass to this function
+    # Update the server-side model for the current batch
+    net_model_server[idx] = copy.deepcopy(net_server)
     
     # count1: to track the completion of the local batch associated with one client
     count1 += 1
@@ -292,12 +318,16 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch):
         
         prRed('Client{} Train => Local Epoch: {} \tAcc: {:.3f} \tLoss: {:.4f}'.format(idx, l_epoch_count, acc_avg_train, loss_avg_train))
         
-                
+        # copy the last trained model in the batch       
+        w_server = net_server.state_dict()      
+        
         # If one local epoch is completed, after this a new client will come
         if l_epoch_count == l_epoch-1:
             
-            l_epoch_check = True                # to evaluate_server function - to check local epoch has completed or not
-                       
+            l_epoch_check = True                # to evaluate_server function - to check local epoch has completed or not 
+            # We store the state of the net_glob_server() 
+            w_locals_server.append(copy.deepcopy(w_server))
+            
             # we store the last accuracy in the last batch of the epoch and it is not the average of all local epochs
             # this is because we work on the last trained model and its accuracy (not earlier cases)
             
@@ -314,12 +344,19 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch):
                 idx_collect.append(idx) 
                 #print(idx_collect)
         
-        # This is to check if all users are served for one round --------------------
+        # This is for federation process--------------------
         if len(idx_collect) == num_users:
             fed_check = True                                                  # to evaluate_server function  - to check fed check has hitted
-            # all users served for one round ------------------------- output print and update is done in evaluate_server()
+            # Federation process at Server-Side------------------------- output print and update is done in evaluate_server()
             # for nicer display 
-                        
+                                   
+            w_glob_server = FedAvg(w_locals_server)   
+            
+            # server-side global model update and distribute that model to all clients ------------------------------
+            net_glob_server.load_state_dict(w_glob_server)    
+            net_model_server = [net_glob_server for i in range(num_users)]
+            
+            w_locals_server = []
             idx_collect = []
             
             acc_avg_all_user_train = sum(acc_train_collect_user)/len(acc_train_collect_user)
@@ -336,17 +373,18 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch):
 
 # Server-side functions associated with Testing
 def evaluate_server(fx_client, y, idx, len_batch, ell):
-    global net_glob_server, criterion, batch_acc_test, batch_loss_test
-    global loss_test_collect, acc_test_collect, count2, num_users, acc_avg_train_all, loss_avg_train_all, l_epoch_check, fed_check
+    global net_model_server, criterion, batch_acc_test, batch_loss_test, check_fed, net_server, net_glob_server 
+    global loss_test_collect, acc_test_collect, count2, num_users, acc_avg_train_all, loss_avg_train_all, w_glob_server, l_epoch_check, fed_check
     global loss_test_collect_user, acc_test_collect_user, acc_avg_all_user_train, loss_avg_all_user_train
     
-    net_glob_server.eval()
+    net = copy.deepcopy(net_model_server[idx]).to(device)
+    net.eval()
   
     with torch.no_grad():
         fx_client = fx_client.to(device)
         y = y.to(device) 
         #---------forward prop-------------
-        fx_server = net_glob_server(fx_client)
+        fx_server = net(fx_client)
         
         # calculate loss
         loss = criterion(fx_server, y)
@@ -380,10 +418,13 @@ def evaluate_server(fx_client, y, idx, len_batch, ell):
                 loss_test_collect_user.append(loss_avg_test_all)
                 acc_test_collect_user.append(acc_avg_test_all)
                 
-            # if all users are served for one round ----------                    
+            # if federation is happened----------                    
             if fed_check:
                 fed_check = False
-                                
+                print("------------------------------------------------")
+                print("------ Federation process at Server-Side ------- ")
+                print("------------------------------------------------")
+                
                 acc_avg_all_user = sum(acc_test_collect_user)/len(acc_test_collect_user)
                 loss_avg_all_user = sum(loss_test_collect_user)/len(loss_test_collect_user)
             
@@ -400,7 +441,7 @@ def evaluate_server(fx_client, y, idx, len_batch, ell):
     return 
 
 #==============================================================================================================
-#                                       Clients Side Program
+#                                       Clients-side Program
 #==============================================================================================================
 class DatasetSplit(Dataset):
     def __init__(self, dataset, idxs):
@@ -432,6 +473,7 @@ class Client(object):
         
         for iter in range(self.local_ep):
             len_batch = len(self.ldr_train)
+            
             for batch_idx, (images, labels) in enumerate(self.ldr_train):
                 images, labels = images.to(self.device), labels.to(self.device)
                 optimizer_client.zero_grad()
@@ -467,7 +509,6 @@ class Client(object):
             #prRed('Client{} Test => Epoch: {}'.format(self.idx, ell))
             
         return          
-
 #=====================================================================================================
 # dataset_iid() will create a dictionary to collect the indices of the data samples randomly for each client
 # IID HAM10000 datasets will be created based on this
@@ -478,114 +519,33 @@ def dataset_iid(dataset, num_users):
     for i in range(num_users):
         dict_users[i] = set(np.random.choice(all_idxs, num_items, replace = False))
         all_idxs = list(set(all_idxs) - dict_users[i])
-    return dict_users               
+    return dict_users    
+                          
 #=============================================================================
 #                         Data loading 
 #============================================================================= 
-# TODO 更换数据集，多做几组实验
-# TODO 更换SFLv1算法，作为新的baseline
-# 目前baseline 集中式、fl、SFLv1、SFLv2、我的方法
-# 目前变量 数据集 number of users
-
-df = pd.read_csv('data/HAM10000_metadata.csv')
-print(df.head())
-
-
-lesion_type = {
-    'nv': 'Melanocytic nevi',
-    'mel': 'Melanoma',
-    'bkl': 'Benign keratosis-like lesions ',
-    'bcc': 'Basal cell carcinoma',
-    'akiec': 'Actinic keratoses',
-    'vasc': 'Vascular lesions',
-    'df': 'Dermatofibroma'
-}
-
-# merging both folders of HAM1000 dataset -- part1 and part2 -- into a single directory
-imageid_path = {os.path.splitext(os.path.basename(x))[0]: x
-                for x in glob(os.path.join("data", '*', '*.jpg'))}
-
-
-#print("path---------------------------------------", imageid_path.get)
-df['path'] = df['image_id'].map(imageid_path.get)
-df['cell_type'] = df['dx'].map(lesion_type.get)
-df['target'] = pd.Categorical(df['cell_type']).codes
-print(df['cell_type'].value_counts())
-print(df['target'].value_counts())
-
-#==============================================================
-# Custom dataset prepration to Pytorch format
-class SkinData(Dataset):
-    def __init__(self, df, transform = None):
-        
-        self.df = df
-        self.transform = transform
-        
-    def __len__(self):
-        
-        return len(self.df)
-    
-    def __getitem__(self, index):
-        
-        X = Image.open(self.df['path'][index]).resize((64, 64))
-        y = torch.tensor(int(self.df['target'][index]))
-        
-        if self.transform:
-            X = self.transform(X)
-        
-        return X, y
-
-#=============================================================================
-# Train-test split              
-train, test = train_test_split(df, test_size = 0.1)
-
-train = train.reset_index()
-test = test.reset_index()
-
-#=============================================================================
-#                         Data preprocessing
-#=============================================================================  
-# Data preprocessing: Transformation 
-mean = [0.485, 0.456, 0.406]
-std = [0.229, 0.224, 0.225]
-
-train_transforms = transforms.Compose([transforms.RandomHorizontalFlip(), 
-                        transforms.RandomVerticalFlip(),
-                        transforms.Pad(3),
-                        transforms.RandomRotation(10),
-                        transforms.CenterCrop(64),
-                        transforms.ToTensor(), 
-                        transforms.Normalize(mean = mean, std = std)
-                        ])
-    
-test_transforms = transforms.Compose([
-                        transforms.Pad(3),
-                        transforms.CenterCrop(64),
-                        transforms.ToTensor(), 
-                        transforms.Normalize(mean = mean, std = std)
-                        ])    
-
-
-# With augmentation
-dataset_train = SkinData(train, transform = train_transforms)
-dataset_test = SkinData(test, transform = test_transforms)
+dataset_train = torchvision.datasets.FashionMNIST("./data", download=True, transform=
+                                                transforms.Compose([transforms.ToTensor()]))
+dataset_test = torchvision.datasets.FashionMNIST("./data", download=True, train=False, transform=
+                                               transforms.Compose([transforms.ToTensor()]))  
 
 #----------------------------------------------------------------
 dict_users = dataset_iid(dataset_train, num_users)
 dict_users_test = dataset_iid(dataset_test, num_users)
 
-#------------ Training And Testing -----------------
+
+#------------ Training And Testing  -----------------
 net_glob_client.train()
+
 #copy weights
 w_glob_client = net_glob_client.state_dict()
-
 # Federation takes place after certain local epochs in train() client-side
 # this epoch is global epoch, also known as rounds
 for iter in range(epochs):
     m = max(int(frac * num_users), 1)
     idxs_users = np.random.choice(range(num_users), m, replace = False)
     w_locals_client = []
-      
+    # 前5个 3层
     for idx in idxs_users:
         local = Client(net_glob_client, idx, lr, device, dataset_train = dataset_train, dataset_test = dataset_test, idxs = dict_users[idx], idxs_test = dict_users_test[idx])
         # Training ------------------
@@ -594,18 +554,18 @@ for iter in range(epochs):
         
         # Testing -------------------
         local.evaluate(net = copy.deepcopy(net_glob_client).to(device), ell= iter)
-        
-            
+     #后5个 6层   
+         
     # Ater serving all clients for its local epochs------------
-    # Federation process at Client-Side------------------------
-    print("------------------------------------------------------------")
-    print("------ Fed Server: Federation process at Client-Side -------")
-    print("------------------------------------------------------------")
+    # Fed  Server: Federation process at Client-Side-----------
+    print("-----------------------------------------------------------")
+    print("------ FedServer: Federation process at Client-Side ------- ")
+    print("-----------------------------------------------------------")
     w_glob_client = FedAvg(w_locals_client)   
     
     # Update client-side global model 
     net_glob_client.load_state_dict(w_glob_client)    
-    
+      
 #===================================================================================     
 
 print("Training and Evaluation completed!")    
@@ -620,11 +580,3 @@ df.to_excel(file_name, sheet_name= "v1_test", index = False)
 #=============================================================================
 #                         Program Completed
 #=============================================================================
- 
-
-
-
-
-
-
-
